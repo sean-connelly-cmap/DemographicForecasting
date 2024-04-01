@@ -1,3 +1,7 @@
+
+# Overview ----------------------------------------------------------------
+
+
 # CMAP | Noel Peterson, Alex Bahls | 7/12
 
 # This script has two parts: first, it spatially relates 2010 PUMAs to each of the four modeling regions.
@@ -8,6 +12,10 @@
 # both 2010 PUMS and 2020 PUMS geography depending on year) -- this is something that COULD be improved but right now
 # I consider the cost of adding another year relatively high (itd take some thinking to code in) and the payoff to be
 # quite low (did the ratio of <1 year olds to 1-4 year olds really change much when looking at 2017 vs 2022?)
+# see https://github.com/walkerke/tidycensus/issues/555
+
+
+# set up ------------------------------------------------------------------
 
 
 library(devtools)
@@ -20,9 +28,21 @@ library(units)
 #install_github("CMAP-REPOS/cmapgeo", build_vignettes=TRUE)
 library(cmapgeo)
 
+CMAP_GEOIDS <- cmapgeo::county_fips_codes$cmap
+
+COUNTIES <- list(
+  IL = c(31, 43, 89, 93, 97, 111, 197,       # CMAP counties
+         7, 37, 63, 91, 99, 103, 141, 201),  # Non-CMAP Illinois counties
+  IN = c(89, 91, 127),                       # Indiana counties
+  WI = c(59, 101, 127)                       # Wisconsin counties
+)
+
+#see note above -- should stay at 2021 for now
 pums_year <- 2021
 
-####### Part 1 : spatially relate 21 counties to PUMAs
+#  create puma sf for modelling region -------
+
+#2010 PUMAs for the modelling region should probably be in the V drive but are not currently
 
 # Get 21-county boundaries
 cmap_21co_sf <- filter(county_sf, travel_model)
@@ -79,8 +99,10 @@ puma_region <- puma_21co_sf %>%
 
 save(puma_region, file="Output/PumaRegions.Rdata") # puma_region, used in PUMS_Headship_Rates.R and income.R
 
-############ Part 2: pull 2021 ACS population data by PUMA, calculate proportion of 0-4 age group that is 0-1 yrs old
 
+# Pull PUMS Data ----------------------------------------------------------
+
+# https://walker-data.com/census-r/introduction-to-census-microdata.html?q=get_pums#basic-usage-of-get_pums
 # Get PUMS person-level age data
 pums_il <- get_pums(variables = c("PUMA", "AGEP", "SEX"), state = "17", year = 2021, survey = "acs5",
                     variables_filter = list(AGEP = 0:4), show_call = TRUE)
@@ -89,9 +111,11 @@ pums_in <- get_pums(variables = c("PUMA", "AGEP", "SEX"), state = "18", year = 2
 pums_wi <- get_pums(variables = c("PUMA", "AGEP", "SEX"), state = "55", year = 2021, survey = "acs5",
                     variables_filter = list(AGEP = 0:4), show_call = TRUE)
 
+
+# analyze PUMS data -------------------------------------------------------
+
 # Join PUMS data to PUMA region assignments
-pums_21co <- bind_rows(pums_il, pums_in) %>%
-  bind_rows(pums_wi) %>%
+pums_21co <- bind_rows(pums_il, pums_in, pums_wi) %>%
   rename(ExactAge = AGEP) %>%
   mutate(AgeGroup = if_else(ExactAge == 0, "Less than 1 year", "1 to 4 years"),
          Sex = if_else(SEX == 1, "Male", "Female")) %>%
@@ -108,3 +132,6 @@ AGE_0_4_FREQ <- pums_21co %>%
 
 # Save table to output folder
 save(AGE_0_4_FREQ, file="Output/Age_0_4_Freq.Rdata")
+
+#clean environment
+rm(list=setdiff(ls(), c("AGE_0_4_FREQ","POP", "COUNTIES", "CMAP_GEOIDS")))

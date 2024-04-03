@@ -79,7 +79,18 @@ puma_21co_sf <- puma_21co_sf %>%
     STATEFP10 == "18" ~ "External IN",
     STATEFP10 == "55" ~ "External WI",
     str_detect(NAMELSAD10,"(?i)Chicago|Cook|DuPage|Kane|Kendall|Lake|McHenry|Will") ~ "CMAP Region",
-    T ~ "External IL")
+    T ~ "External IL"),
+    Region_cc = case_when(
+      Region != "CMAP Region" ~ Region,
+      str_detect(NAMELSAD10,"Chicago|Cook County") ~ "Cook",
+      str_detect(NAMELSAD10,"DuPage County|Dupage County") ~ "DuPage",
+      str_detect(NAMELSAD10,"Kane County") ~ "Kane",
+      str_detect(NAMELSAD10,"Kendall") ~ "Kendall",
+      str_detect(NAMELSAD10,"Lake") ~ "Lake",
+      str_detect(NAMELSAD10,"McHenry") ~ "McHenry",
+      str_detect(NAMELSAD10,"Will") ~ "Will",
+      T ~ NA
+    )
   )
 
 
@@ -95,7 +106,7 @@ p <- ggplot() +
 # Save data frame of PUMA region assignments to join to PUMS data
 puma_region <- puma_21co_sf %>%
   as.data.frame() %>%
-  select(GEOID10, STATEFP10, PUMACE10, Region)
+  select(GEOID10, STATEFP10, PUMACE10, Region, Region_cc)
 
 save(puma_region, file="Output/PumaRegions.Rdata") # puma_region, used in PUMS_Headship_Rates.R and income.R
 
@@ -124,7 +135,7 @@ pums_21co <- bind_rows(pums_il, pums_in, pums_wi) %>%
 
 # Summarize PUMS by age and region
 AGE_0_4_FREQ <- pums_21co %>%
-  group_by(Region, Sex, AgeGroup) %>%
+  group_by(Region_cc, Sex, AgeGroup) %>%
   summarize(Population = sum(PWGTP)) %>%
   mutate(Age_0_4_Share = Population / sum(Population)) %>%
   ungroup() %>%

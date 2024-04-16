@@ -68,7 +68,7 @@ GQ <- GQ_DATA %>%
   )
 
 # Adds columns for Sex and Age, but retain Category column
-GQ <- GQ %>%
+GQ_grouped <- GQ %>%
   separate(Category, into=c("Sex", "Age"), sep = " ", extra = "merge", remove = FALSE) %>%
   mutate(
     Sex = case_when(Sex == "County" & str_starts(Category, "County Male") ~ "Male",
@@ -81,7 +81,7 @@ GQ <- GQ %>%
 new_age_groups <- c("Under 20 years","Under 25 years","25 years and over", "65 years and over")
 
 GQlong <- GQ %>% filter(Sex != "All") %>% filter(!Age %in% c('Male Total', 'Female Total')) %>%
-  group_by(Region, Sex, Age, Concept) %>%
+  group_by(Region_cc, Sex, Age, Concept) %>%
   summarize(Population = sum(Value)) %>%
   mutate(Age = case_when(Age == "Under 5 years" ~ "0 to 4 years",
                          TRUE ~ Age),

@@ -92,10 +92,11 @@ for (YEAR in POP_YEARS) {
     rename(Population = value) %>%
     mutate(
       Year = YEAR,
-      Region = case_when(GEOID %in% CMAP_GEOIDS ~ "CMAP Region",
+      Region_cc = case_when(GEOID %in% CMAP_GEOIDS ~ GEOID,
                          State == "Illinois" ~ "External IL",
                          State == "Indiana" ~ "External IN",
-                         State == "Wisconsin" ~ "External WI"),
+                         State == "Wisconsin" ~ "External WI",
+                         T ~ NA),
       Age = case_when(Age %in% c("Under 5 years") ~ "0 to 4 years",
                       Age %in% c("15 to 17 years", "18 and 19 years") ~ "15 to 19 years",
                       Age %in% c("20 years", "21 years", "22 to 24 years") ~ "20 to 24 years",
@@ -103,7 +104,7 @@ for (YEAR in POP_YEARS) {
                       Age %in% c("65 and 66 years", "67 to 69 years") ~ "65 to 69 years",
                       TRUE ~ Age)
     ) %>%
-    group_by(GEOID, County, State, Sex, Age, Year, Region) %>%
+    group_by(GEOID, County, State, Sex, Age, Year, Region_cc) %>%
     summarize(Population = sum(Population)) %>%
     drop_na() %>%
     ungroup()
@@ -136,10 +137,11 @@ for (YEAR in POP_YEARS) {
                              T ~ str_trim(Age)),
              Sex = str_trim(Sex),
              Year = YEAR,
-             Region = case_when(GEOID %in% CMAP_GEOIDS ~ "CMAP Region",
+             Region_cc = case_when(GEOID %in% CMAP_GEOIDS ~ GEOID,
                                 State == "Illinois" ~ "External IL",
                                 State == "Indiana" ~ "External IN",
-                                State == "Wisconsin" ~ "External WI"),
+                                State == "Wisconsin" ~ "External WI",
+                                T ~ NA),
              Age = case_when(Age %in% c("Under 5 years") ~ "0 to 4 years",
                              Age %in% c("15 to 17 years", "18 and 19 years") ~ "15 to 19 years",
                              Age %in% c("20 years", "21 years", "22 to 24 years") ~ "20 to 24 years",
@@ -149,7 +151,7 @@ for (YEAR in POP_YEARS) {
       ) %>%
       filter(Sex != "Total" & Age != "Total") %>% #probably a way to make efficient
       rename(Population = value) %>%
-      group_by(GEOID, County, State, Sex, Age, Year, Region) %>%
+      group_by(GEOID, County, State, Sex, Age, Year, Region_cc) %>%
       summarize(Population = sum(Population)) %>%
       drop_na() %>%
       ungroup()
@@ -182,7 +184,7 @@ for (STATE in names(COUNTIES)) {
       rename(Population = value, Age = AGEGROUP, Sex = SEX) %>%
       separate(NAME, c("County", "State"), sep = "\\, ") %>%
       mutate(Year = year,
-             Region = case_when(GEOID %in% CMAP_GEOIDS ~ "CMAP Region",
+             Region_cc = case_when(GEOID %in% CMAP_GEOIDS ~ GEOID,
                                 State == "Illinois" ~ "External IL",
                                 State == "Indiana" ~ "External IN",
                                 State == "Wisconsin" ~ "External WI"),
@@ -196,7 +198,7 @@ for (STATE in names(COUNTIES)) {
       rename(Population = value, Age = AGEGROUP, Sex = SEX) %>%
       separate(NAME, c("County", "State"), sep = "\\, ") %>%
       mutate(Year = PEP_YEARS[as.character(DATE)],
-             Region = case_when(GEOID %in% CMAP_GEOIDS ~ "CMAP Region",
+             Region = case_when(GEOID %in% CMAP_GEOIDS ~ GEOID,
                                 State == "Illinois" ~ "External IL",
                                 State == "Indiana" ~ "External IN",
                                 State == "Wisconsin" ~ "External WI"),

@@ -16,6 +16,7 @@
 library(tidyverse)
 library(tidycensus)
 library(readxl)
+library(janitor)
 
 # Set parameters ----------------------------------------------------------
 
@@ -107,7 +108,8 @@ for (YEAR in POP_YEARS) {
     group_by(GEOID, County, State, Sex, Age, Year, Region_cc) %>%
     summarize(Population = sum(Population)) %>%
     drop_na() %>%
-    ungroup()
+    ungroup() |>
+    clean_names()
 
   }
 
@@ -154,7 +156,8 @@ for (YEAR in POP_YEARS) {
       group_by(GEOID, County, State, Sex, Age, Year, Region_cc) %>%
       summarize(Population = sum(Population)) %>%
       drop_na() %>%
-      ungroup()
+      ungroup() |>
+      clean_names()
   }
 }
 
@@ -189,7 +192,8 @@ for (STATE in names(COUNTIES)) {
                                 State == "Indiana" ~ "External IN",
                                 State == "Wisconsin" ~ "External WI"),
              Age = str_replace_all(Age, "Age ", "")) %>%
-      select(-year)
+      select(-year) |>
+      clean_names()
 
     PEP_TEMP_old <- get_estimates(product="characteristics", geography = "county",
                               county = COUNTIES[[STATE]], state = STATE, breakdown = c("SEX", "AGEGROUP"),
@@ -198,13 +202,15 @@ for (STATE in names(COUNTIES)) {
       rename(Population = value, Age = AGEGROUP, Sex = SEX) %>%
       separate(NAME, c("County", "State"), sep = "\\, ") %>%
       mutate(Year = PEP_YEARS[as.character(DATE)],
-             Region = case_when(GEOID %in% CMAP_GEOIDS ~ GEOID,
+             Region_cc = case_when(GEOID %in% CMAP_GEOIDS ~ GEOID,
                                 State == "Illinois" ~ "External IL",
                                 State == "Indiana" ~ "External IN",
                                 State == "Wisconsin" ~ "External WI"),
              Age = str_replace_all(Age, "Age ", "")) %>%
-      select(-DATE)
-      names(PEP_TEMP$Year) <- NULL
+      select(-DATE) |>
+      clean_names()
+
+      names(PEP_TEMP$year) <- NULL
 
     PEP_DATA <- bind_rows(PEP_DATA, PEP_TEMP, PEP_TEMP_old)
 }
@@ -216,15 +222,32 @@ for (STATE in names(COUNTIES)) {
 for(YEAR in PEP_YEARS) {
 
   POP[[as.character(YEAR)]] <- PEP_DATA %>%
-    filter(Year == YEAR, !(Age %in% PEP_remove)) %>% # Restrict to specific year and age groupings
-    arrange(GEOID)
+    filter(year == YEAR, !(age %in% PEP_remove)) %>% # Restrict to specific year and age groupings
+    arrange(geoid)
 }
 
 # Import Excel files for select years and save final POP data file -------------------------------
 
-POP[["1995"]] <- read_excel("Input/Pop1995.xlsx")
-POP[["2005"]] <- read_excel("Input/Pop2005.xlsx")
+POP[["1995"]] <- read_excel("Input/Pop1995.xlsx") |>
+  clean_names() |>
+  mutate(geoid = as.character(geoid),
+    region_cc = case_when(
+                          region == "CMAP Region" ~ geoid,
+                          T ~ region
+                          )
+  ) |>
+  select(!region)
 
+
+POP[["2005"]] <- read_excel("Input/Pop2005.xlsx") |>
+  clean_names() |>
+  mutate(geoid = as.character(geoid),
+    region_cc = case_when(
+                          region == "CMAP Region" ~ geoid,
+                          T ~ region
+                          )
+  ) |>
+  select(!region)
 
 # Finalize ------------------------------------
 
@@ -235,16 +258,16 @@ POP <- POP[as.character(sort(as.numeric(names(POP))))]
 # ## --> QC check POP df w/ PEP to see totals, look over years -----
 # check_tot <- POP %>%
 #   reduce(rbind)
-#
+
 # # Take a look at totals by region and year
 # check_tot %>%
-#   janitor::tabyl(Region, Year)
+#   janitor::tabyl(region_cc, year)
 #
 # check_tot <- check_tot %>%
-#   group_by(Region, Year) %>%
-#   summarize("Pop" = sum(Population, na.rm = TRUE)) %>%
-#   arrange(Region, Year) %>%
-#   pivot_wider(names_from = "Year", values_from = "Pop")
+#   group_by(region_cc, year) %>%
+#   summarize("pop" = sum(population, na.rm = TRUE)) %>%
+#   arrange(region_cc, year) %>%
+#   pivot_wider(names_from = "year", values_from = "pop")
 
 # save POP list to Output folder
 save(POP, file="Output/POP_PEP.Rdata")

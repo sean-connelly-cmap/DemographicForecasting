@@ -6,6 +6,7 @@ library(dplyr)
 library(tidyverse)
 library(tidycensus)
 library(readxl)
+library(janitor)
 
 #looked into using CDC wonder data but it had too many supressed counts to use reliably
 #i.e. in 2019 external WI there are 44/138 county/age/sex combinations with suppressed counts
@@ -14,77 +15,73 @@ library(readxl)
 
 load("Output/POP_PEP.Rdata")
 load("Output/Age_0_4_Freq.Rdata")
-AGE_0_4_FREQ$Population <- as.numeric(AGE_0_4_FREQ$Population)
 
 MORT_YEARS <- c(2014:2018)
 DEATHS_XLSX <- "Input/CMAPMortality1990-2019.xlsx"
 
-county_fips_index <- as_tibble(cbind(names(cmapgeo::county_fips_codes$cmap),
-                                     cmapgeo::county_fips_codes$cmap)) |>
-  rename(county_name = 1, county_code = 2)
+county_fips_index <- as_tibble(cbind(county_name = names(cmapgeo::county_fips_codes$cmap),
+                                     county_code = cmapgeo::county_fips_codes$cmap))
 
 # Create mortality age groups ---------------------------------------------------------
 
-MORT_POP <- tibble()
+mort_pop <- tibble()
 
 for (YEAR in MORT_YEARS) {
-   MORT_POP <- bind_rows(MORT_POP, POP[[as.character(YEAR)]])
+  mort_pop <- bind_rows(mort_pop, POP[[as.character(YEAR)]])
 }
 
-MORT_POP <- MORT_POP |> mutate(Region_cc = case_when(
-  Region == "CMAP Region" ~ GEOID,
-  T ~ Region
-))
-
 # Load deaths data
-Deaths <- read_excel(DEATHS_XLSX) %>%
+deaths <- read_excel(DEATHS_XLSX) %>%
   filter(Year %in% MORT_YEARS) %>%
-  mutate(GEOID = as.character(GEOID),
-         Age = case_when(Age %in% c("85 to 89 years", "90 to 94 years", "95 years and over") ~ "85 years and over",
+  mutate(geoid = as.character(GEOID),
+         age = case_when(Age %in% c("85 to 89 years", "90 to 94 years", "95 years and over") ~ "85 years and over",
                          TRUE ~ Age),
-         Region_cc = case_when(
-           Region == "CMAP Region" ~ GEOID,
+         region_cc = case_when(
+           Region == "CMAP Region" ~ geoid,
            T ~ Region
          )) %>%
-  group_by(GEOID, Sex, Age, Year, Region_cc) %>%
-  summarize(Mortality = sum(Mortality), .groups = "drop")
+  clean_names() |>
+  group_by(geoid = geoid_2, sex, age = age_2, year, region_cc) %>%
+  summarize(mortality = sum(mortality), .groups = "drop")
 
 # Join pop to deaths
-MORT_DATA <- MORT_POP %>%
-  mutate(Age = ifelse(Age == "85 years and older","85 years and over", Age)) %>%
-  full_join(Deaths, by=c('GEOID', 'Age', 'Sex', 'Year', 'Region_cc')) %>%
-  group_by(Age, Sex, Region_cc) %>%
-  summarise(Population = sum(Population),
-            Mortality = sum(Mortality),
+mort_data <- mort_pop %>%
+  mutate(age = ifelse(age == "85 years and older","85 years and over", age)) %>%
+  full_join(deaths, by=c('geoid', 'age', 'sex', 'year', 'region_cc')) %>%
+  group_by(age, sex, region_cc) %>%
+  summarise(population = sum(population),
+            mortality = sum(mortality),
             .groups = "drop") %>%
-  arrange(Region_cc, desc(Sex))
+  arrange(region_cc, desc(sex))
 
 # Use PUMA proportion estimates for 0-1 and 1-4 age group -------------------------------------
 
-AGE_0_4_PROP <- AGE_0_4_FREQ %>%
-  mutate(Age = case_when(AgeGroup == 'Less than 1 year' ~ '0 to 1 years',
-                         TRUE ~ AgeGroup)) %>%
-  left_join(county_fips_index, by = c("Region_cc" = "county_name")) |>
-  mutate(Region_cc = case_when(
-    str_detect(Region_cc, "External") ~ Region_cc,
+age_0_4_prop <- age_0_4_freq %>%
+  mutate(age = case_when(age_group == 'Less than 1 year' ~ '0 to 1 years',
+                         TRUE ~ age_group)) %>%
+  left_join(county_fips_index, by = c("region_cc" = "county_name")) |>
+  mutate(region_cc = case_when(
+    str_detect(region_cc, "External") ~ region_cc,
     T ~ county_code
   )) |>
-  select(-c(AgeGroup,Population, county_code))
+  select(-c(age_group,population, county_code))
 
-MORT_DATA_with_1_4 <- MORT_DATA %>%
-  left_join(AGE_0_4_PROP, by=c('Age','Region_cc', 'Sex')) |>
-  mutate(Population = case_when(Age == '0 to 1 years' ~ lead(Population)*Age_0_4_Share,
-                                Age == '1 to 4 years' ~ lag(Population)*Age_0_4_Share,
-                                TRUE ~ Population)) %>%
-  select(!Age_0_4_Share) %>%
-  filter(Age != '0 to 4 years')
+mort_data_with_1_4 <- mort_data %>%
+  left_join(age_0_4_prop, by=c('age','region_cc', 'sex')) |>
+  mutate(population = case_when(age == '0 to 1 years' ~ lead(population)*age_0_4_share,
+                                age == '1 to 4 years' ~ lag(population)*age_0_4_share,
+                                TRUE ~ population)) %>%
+  select(!age_0_4_share) %>%
+  filter(age != '0 to 4 years')
 
 # Life Tables Calculations ---------------------------------------------------------
 
 #Life tables are a common means of constructing survival rates -- see forecast book p. 54
 
-LT <- tibble(Age = unique(Deaths$Age)) %>%
-  mutate(x = as.numeric(str_split_fixed(Age, " ", 2)[,1])) %>%
+#ab note 4/29/2024 -- dont think we actually need these but keeping in for now just in case
+
+LT <- tibble(age = unique(deaths$age)) %>%
+  mutate(x = as.numeric(str_split_fixed(age, " ", 2)[,1])) %>%
   arrange(x) %>%
   add_column(Ax = c(0.1,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5))
 
@@ -95,34 +92,34 @@ LT <- tibble(Age = unique(Deaths$Age)) %>%
 
 
 #see page 54 of forecast book for variable definitions
-LifeTable <- MORT_DATA_with_1_4 %>%
-  left_join(LT, by="Age") %>%
-  select(Region_cc, Sex, Age, Mortality, Population, x, Ax) %>%
-  arrange(Region_cc, desc(Sex), x) %>%
-  group_by(Region_cc, Sex) %>%
-  mutate(Mx = (Mortality/as.numeric(Population)), #Mortality rate (using mid-year population)
-    n = case_when(Age == '0 to 1 years' ~ 1, # n -- number of years in interval
-                  Age == '1 to 4 years' ~ 4,
-                  Age == '85 years and over' ~ 2/Mx, #I have thought about this calc a lot and don't have a perfect
+life_table <- mort_data_with_1_4 %>%
+  left_join(LT, by="age") %>%
+  select(region_cc, sex, age, mortality, population, x, Ax) %>%
+  arrange(region_cc, desc(sex), x) %>%
+  group_by(region_cc, sex) %>%
+  mutate(Mx = (mortality/as.numeric(population)), #Mortality rate (using mid-year population)
+    n = case_when(age == '0 to 1 years' ~ 1, # n -- number of years in interval
+                  age == '1 to 4 years' ~ 4,
+                  age == '85 years and over' ~ 2/Mx, #I have thought about this calc a lot and don't have a perfect
                               #conceptual understanding of it; however the n value for 85+ isn't used in subsequent code
                   TRUE ~ 5),
-    Qx = ifelse(Age == '85 years and over', 1,  # 85+ should always be 1
+    Qx = ifelse(age == '85 years and over', 1,  # 85+ should always be 1
                 (n*Mx/(1+n*(1-Ax)*Mx))), #proportion that will die during that age internal; formula to adjust for mid-year population denom
     Px = (1-Qx), #probabilty of living through age period
     Ix = head(accumulate(Px, `*`, .init=100000), -1), # 0-1 should always be 100000 -- number of people who reach age interval; 100000*p
-    Dx = (ifelse(Age == '85 years and over', Ix, Ix -lead(Ix))), #number of people that will die during internal
-    Lx = (ifelse(Age == '85 years and over', Ix/Mx, n*(lead(Ix)+(Ax*Dx)))), # of person years lived
-    temp = ifelse(Age == '85 years and over', Lx, 0),
-    Tx = (ifelse(Age == '85 years and Over', Lx, accumulate(Lx, `+`, .dir = "backward"))), #cumulative number of person years lived after internval
+    Dx = (ifelse(age == '85 years and over', Ix, Ix -lead(Ix))), #number of people that will die during internal
+    Lx = (ifelse(age == '85 years and over', Ix/Mx, n*(lead(Ix)+(Ax*Dx)))), # of person years lived
+    temp = ifelse(age == '85 years and over', Lx, 0),
+    Tx = (ifelse(age == '85 years and Over', Lx, accumulate(Lx, `+`, .dir = "backward"))), #cumulative number of person years lived after internval
     Ex = (Tx/Ix), #life expectancy, number of people over number of future person years
-    Sx = case_when(Age == '0 to 1 years' ~ Lx/Ix,
-                   Age == '1 to 4 years' ~ Lx/(lag(Lx)*4),
-                   Age == '5 to 9 years' ~ Lx/(lag(Lx) + lag(Lx, n = 2)),
-                   Age == '85 years and over' ~ Lx/(Lx +lag(Lx)),
+    Sx = case_when(age == '0 to 1 years' ~ Lx/Ix,
+                   age == '1 to 4 years' ~ Lx/(lag(Lx)*4),
+                   age == '5 to 9 years' ~ Lx/(lag(Lx) + lag(Lx, n = 2)),
+                   age == '85 years and over' ~ Lx/(Lx +lag(Lx)),
                    TRUE ~ Lx/lag(Lx)) #survival rate in life years
   ) %>%
   select(-temp) %>%
-  relocate(c(x, n, Ax), .before= Mortality)%>%
+  relocate(c(x, n, Ax), .before= mortality) %>%
   ungroup()
 
 # Read in Census tables -----------------------------------------------------------
@@ -166,7 +163,8 @@ census_17_proc <- census_mort_proj_17 |>
          Age = str_c(Age," years"),
          Age = ifelse(Age == "85 to over years","85 years and over",Age),
          year = 2017) |>
-  pivot_wider(id_cols = c("Sex","Age"), names_from = year, values_from = mort_rate_average)
+  pivot_wider(id_cols = c("Sex","Age"), names_from = year, values_from = mort_rate_average) |>
+  clean_names()
 
 # https://www.census.gov/newsroom/press-kits/2023/population-projections.html
 # Projected Mortality Rates by Age, Sex, Race, and Hispanic Origin for the United States: 2023 to 2100 (NP2023_A2)
@@ -211,20 +209,21 @@ census_mort_proj_processed <- census_mort_proj |>
   mutate(Age = str_replace(Age, "_", " to "),
          Age = str_c(Age," years"),
          Age = ifelse(Age == "85 to over years","85 years and over",Age)) |>
-  pivot_wider(id_cols = c("Sex","Age"), names_from = year_floor, values_from = mort_rate_average)
+  pivot_wider(id_cols = c("Sex","Age"), names_from = year_floor, values_from = mort_rate_average) |>
+  clean_names()
 
 #need to convert from mortality rate to survival rate
 #then to mirror the SSA data the raw number should be a ratio of present (2017) survival rates
 census_data_combined <- census_17_proc |>
   left_join(census_mort_proj_processed) |>
-  mutate(across(where(is.numeric), \(x) (1-x)/(1-`2017`))) |>
-  select(!`2017`)
+  mutate(across(where(is.numeric), \(x) (1-x)/(1-x2017))) |>
+  select(!x2017)
 
 # Create final projections for each region  ------------------------------------
 
-Mort_Proj <- LifeTable %>%
-  select(Region_cc, Sex, Age, Sx) %>%
-  left_join(census_data_combined, by= c("Sex", "Age")) %>%
+mort_proj <- life_table %>%
+  select(region_cc, sex, age, Sx) %>%
+  left_join(census_data_combined, by= c("sex", "age")) %>%
   mutate(across(c(5:11), .fns = ~.*Sx)) %>%
   #select(-Sx)
   rename("2018" = Sx) #keep the calculated Sx
@@ -233,5 +232,5 @@ Mort_Proj <- LifeTable %>%
 
 # qc_over_1 <- Mort_Proj %>% filter_at(vars(4:11), any_vars(. >= 1))
 
-save(Deaths, Mort_Proj, MORT_POP, file="Output/Mort_Proj.Rdata")
+save(deaths, mort_proj, mort_pop, file="Output/Mort_Proj.Rdata")
 

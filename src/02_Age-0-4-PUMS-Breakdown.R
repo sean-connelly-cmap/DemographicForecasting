@@ -24,6 +24,7 @@ library(tidycensus)
 library(tigris)
 library(sf)
 library(units)
+library(janitor)
 
 #install_github("CMAP-REPOS/cmapgeo", build_vignettes=TRUE)
 library(cmapgeo)
@@ -75,13 +76,9 @@ puma_21co_sf <- puma_21co_sf %>%
   left_join(calc_intersect) %>%
   mutate(area = st_area(puma_21co_sf)) %>%
   filter(total_intersect > set_units(1, US_survey_foot^2)) %>% #need over one foot of intersect -- drops 10 PUMAs
-  mutate(Region = case_when(
-    STATEFP10 == "18" ~ "External IN",
-    STATEFP10 == "55" ~ "External WI",
-    str_detect(NAMELSAD10,"(?i)Chicago|Cook|DuPage|Kane|Kendall|Lake|McHenry|Will") ~ "CMAP Region",
-    T ~ "External IL"),
-    Region_cc = case_when(
-      Region != "CMAP Region" ~ Region,
+  mutate(region_cc = case_when(
+      STATEFP10 == "18" ~ "External IN",
+      STATEFP10 == "55" ~ "External WI",
       str_detect(NAMELSAD10,"Chicago|Cook County") ~ "Cook",
       str_detect(NAMELSAD10,"DuPage County|Dupage County") ~ "DuPage",
       str_detect(NAMELSAD10,"Kane County") ~ "Kane",
@@ -89,7 +86,7 @@ puma_21co_sf <- puma_21co_sf %>%
       str_detect(NAMELSAD10,"Lake") ~ "Lake",
       str_detect(NAMELSAD10,"McHenry") ~ "McHenry",
       str_detect(NAMELSAD10,"Will") ~ "Will",
-      T ~ NA
+      T ~ "External IL"
     )
   )
 
@@ -106,7 +103,7 @@ p <- ggplot() +
 # Save data frame of PUMA region assignments to join to PUMS data
 puma_region <- puma_21co_sf %>%
   as.data.frame() %>%
-  select(GEOID10, STATEFP10, PUMACE10, Region, Region_cc)
+  select(GEOID10, STATEFP10, PUMACE10, region_cc)
 
 save(puma_region, file="Output/PumaRegions.Rdata") # puma_region, used in PUMS_Headship_Rates.R and income.R
 
@@ -127,22 +124,23 @@ pums_wi <- get_pums(variables = c("PUMA", "AGEP", "SEX"), state = "55", year = 2
 
 # Join PUMS data to PUMA region assignments
 pums_21co <- bind_rows(pums_il, pums_in, pums_wi) %>%
-  rename(ExactAge = AGEP) %>%
-  mutate(AgeGroup = if_else(ExactAge == 0, "Less than 1 year", "1 to 4 years"),
-         Sex = if_else(SEX == 1, "Male", "Female")) %>%
-  select(SERIALNO, PUMA, ST, PWGTP, ExactAge, AgeGroup, Sex) %>%
-  right_join(puma_region, by=c("PUMA" = "PUMACE10", "ST" = "STATEFP10"))
+  rename(exact_age = AGEP) %>%
+  mutate(age_group = if_else(exact_age == 0, "Less than 1 year", "1 to 4 years"),
+         sex = if_else(SEX == 1, "Male", "Female")) %>%
+    clean_names() |>
+  select(serialno, puma, st, pwgtp, exact_age, age_group, sex = sex_2) %>%
+  right_join(puma_region, by=c("puma" = "PUMACE10", "st" = "STATEFP10"))
 
 # Summarize PUMS by age and region
-AGE_0_4_FREQ <- pums_21co %>%
-  group_by(Region_cc, Sex, AgeGroup) %>%
-  summarize(Population = sum(PWGTP)) %>%
-  mutate(Age_0_4_Share = Population / sum(Population)) %>%
+age_0_4_freq <- pums_21co %>%
+  group_by(region_cc, sex, age_group) %>%
+  summarize(population = sum(pwgtp)) %>%
+  mutate(age_0_4_share = population / sum(population)) %>%
   ungroup() %>%
-  filter(!is.na(Sex))
+  filter(!is.na(sex))
 
 # Save table to output folder
-save(AGE_0_4_FREQ, file="Output/Age_0_4_Freq.Rdata")
+save(age_0_4_freq, file="Output/Age_0_4_Freq.Rdata")
 
 #clean environment
-rm(list=setdiff(ls(), c("AGE_0_4_FREQ","POP", "COUNTIES", "CMAP_GEOIDS")))
+rm(list=setdiff(ls(), c("age_0_4_freq","POP", "COUNTIES", "CMAP_GEOIDS")))

@@ -88,7 +88,7 @@ for (YEAR in POP_YEARS) {
     left_join(POP_VARS, by = c("variable" = "name")) %>%
     select(-variable, -label, -concept) %>%
     filter(!is.na(Category) & !(Category  %in% c("Total","Male","Female"))) |> #not necessary but stops warnings later
-    separate_wider_delim(NAME, delim = ",", names = c("County", "State")) |> #updated from depreciated command
+    separate_wider_delim(NAME, delim = ", ", names = c("County", "State")) |> #updated from depreciated command
     separate_wider_delim(Category, delim = " ", names = c("Sex","Age"), too_many = "merge") |>
     rename(Population = value) %>%
     mutate(

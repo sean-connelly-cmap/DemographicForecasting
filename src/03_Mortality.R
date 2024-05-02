@@ -226,7 +226,7 @@ mort_proj <- life_table %>%
   left_join(census_data_combined, by= c("sex", "age")) %>%
   mutate(across(c(5:11), .fns = ~.*Sx)) %>%
   #select(-Sx)
-  rename("2018" = Sx) #keep the calculated Sx
+  rename("x2018" = Sx) #keep the calculated Sx
 
 # Clean-up to values >= 1  ------------------------------------ This could use some adjustments to make it more dynamic
 

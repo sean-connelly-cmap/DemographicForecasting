@@ -11,66 +11,73 @@ options(scipen = 999)
 load("Output/POP_PEP.Rdata")
 
 county_list <- POP$`2019` |>  #choice of year here is arbitrary
-  distinct(GEOID, County, State, Region)
+  distinct(geoid, county, state, region_cc)
 
 # calculate average percentage of total -----------------------------------
 
-pep_2010_ftp <- read_csv("Input/pep_2020_2010.csv")
-pep_2020_ftp <- read_csv("Input/pep_2022_2020.csv")
+#use tidy census to get international migration by county by year
 
-pep_2010_ftp_proc <- pep_2010_ftp |>
-  filter(COUNTY != 0) |> #these are whole states
-  mutate(new_state = case_when(
-    nchar(STATE) == 1 ~ str_c("0",as.character(STATE)),
-    T ~ as.character(STATE)
-  ),
-  new_county = case_when(
-    nchar(COUNTY) == 1 ~ str_c("00",as.character(COUNTY)),
-    nchar(COUNTY) == 2 ~ str_c("0",as.character(COUNTY)),
-    T ~ as.character(COUNTY)
-  ),
-  county_fips = str_c(new_state, new_county)) |>
-  select(county_fips, starts_with("INTERNATIONALMIG"))
 
-pep_2020_ftp_proc <- pep_2020_ftp |>
-  filter(COUNTY != 0) |> #these are whole states
-  mutate(new_state = case_when(
-    nchar(STATE) == 1 ~ str_c("0",as.character(STATE)),
-    T ~ as.character(STATE)
-  ),
-  new_county = case_when(
-    nchar(COUNTY) == 1 ~ str_c("00",as.character(COUNTY)),
-    nchar(COUNTY) == 2 ~ str_c("0",as.character(COUNTY)),
-    T ~ as.character(COUNTY)
-  ),
-  county_fips = str_c(new_state, new_county)) |>
-  select(county_fips, starts_with("INTERNATIONALMIG"))
+##2010-2019 -------------------------------------------------------------------
 
+pep_2010_2019 <- get_estimates(geography = "county",
+                               product = "components",
+                               state = state.abb,
+                               vintage = 2019,
+                               time_series = T) |>
+  clean_names()
+
+pep_2010_2019_proc <- pep_2010_2019 |>
+  mutate(year = period + 2009 ) |>
+  filter(year != 2010, #data is generally weird in 2010, think its a partial year
+         variable == "INTERNATIONALMIG") |>
+  select(!c(name,period, variable)) |>
+  pivot_wider(id_cols = geoid,
+               names_from = year,
+               values_from = value)
+
+
+
+## 2020- -------------------------------------------------------------------
+
+pep_2020_2023 <- get_estimates(geography = "county",
+                               product = "components",
+                               state = state.abb,
+                               vintage = 2023,
+                               time_series = T) |>
+  clean_names()
+
+pep_2020_2023_proc <- pep_2020_2023 |>
+  filter(variable == "INTERNATIONALMIG") |>
+  select(!c(name, variable)) |>
+  pivot_wider(id_cols = geoid,
+              names_from = year,
+              values_from = value)
 
 # combine years and calc percentages --------------------------------------
 
-pep_all_years <- pep_2010_ftp_proc |>
-  left_join(pep_2020_ftp_proc) |>
-  janitor::clean_names() |>
-  mutate(internationalmig2021 = ifelse(is.na(internationalmig2021),0,internationalmig2021),
-         internationalmig2022 = ifelse(is.na(internationalmig2022),0,internationalmig2022)) |>
-  left_join(county_list, by = c("county_fips" = "GEOID")) |>
-  mutate(County = coalesce(County,"Other"),
-         State = coalesce(State, "Other"),
-         Region = coalesce(Region, "Other"),
-         County = ifelse(County == "Other",County,
-                         str_c(County,"&&",State,"&&",Region))) |>
-  group_by(County) |>
+pep_all_years <- pep_2010_2019_proc |>
+  left_join(pep_2020_2023_proc) |>
+  left_join(county_list, by = "geoid") |>
+  clean_names() |>
+  mutate(across(where(is.numeric), \(x) ifelse(is.na(x),0,x)),
+         county = coalesce(county,"Other"),
+         state = coalesce(state, "Other"),
+         region_cc = coalesce(region_cc, "Other"),
+         county = ifelse(county == "Other",
+                         county,
+                         str_c(county,"-",state,"-",region_cc))) |>
+  group_by(county) |>
   summarise(across(where(is.numeric), list(sum))) |>
-  select(!c("internationalmig2021_1","internationalmig2022_1","internationalmig2010_1")) |>
   t() |>
   row_to_names(row_number = 1) |>
   as_tibble() |>
   clean_names() |>
-  mutate_if(is.character, as.numeric) |>
-  mutate(total = rowSums(across(where(is.numeric))),
+  mutate_if(is.character, as.numeric)  |>
+  mutate(total = rowSums(across(where(is.numeric)), na.rm = T),
          year = row_number() + 2010) |>
-  filter(year != 2020) #weird year
+  filter(year != 2020) |>  #COVID
+  relocate(year)
 
 #add percent of total column
 for (x in setdiff(names(pep_all_years),c("year","total"))) {
@@ -84,15 +91,18 @@ for (x in setdiff(names(pep_all_years),c("year","total"))) {
 mean_mig <- pep_all_years |>
   select(ends_with("%")) %>%
   map_df(~(data.frame(average = mean(.x))),
-                      .id = "variable")
+                      .id = "variable") |>
+  mutate(average = ifelse(average < 0, 0, average))
 
 rm(list=setdiff(ls(), c("mean_mig","pep_all_years")))
 
 # Demographics from PUMS --------------------------------------------------
 
+#using 2019 5-year to avoid COVID and the switching pumas in 2022
+
 il_pums <- get_pums(
   variables = c("PUMA", "MIG", "MIGPUMA", "MIGSP","AGEP","SEX"),
-  state = "IL",
+  state = c("IL","IN","WI"),
   survey = "acs5",
   year = 2019,
   recode = TRUE
@@ -105,7 +115,7 @@ international_mig_age_sex_groups <- il_pums |>
          total_international = sum(international),
          percent_of_hh = total_international/total_people) |>
   filter(international == 1 | #immigrants
-           MIG == "b" & percent_of_hh >= 0.5) |>  #babies in HH that are majority immigrants
+           (MIG == "b" & percent_of_hh >= 0.5)) |>  #babies in HH that are majority immigrants
   mutate(age_group = cut(AGEP, c(seq(0,85, by = 5), 999), include.lowest = T)) |>
   group_by(age_group, SEX_label) |>
   summarize(total_in_group = sum(PWGTP)) |>
@@ -146,7 +156,9 @@ mean_migration_year <- list()
 
 for (proj_year in year_list) {
 
-  annual_proj <- census_projections |> filter(year == proj_year) |> pull(baseline)
+  annual_proj <- census_projections |>
+    filter(year == proj_year) |>
+    pull(baseline)
 
   tidy_year <- str_c("x",proj_year) #dont wnat to index to start with a number
 
@@ -158,6 +170,7 @@ for (proj_year in year_list) {
 
 }
 
+#make a list of endings to use for cleaning later
 ending_list <- c("_illinois_external_il_%","_illinois_cmap_region_%",
                  "_wisconsin_external_wi_%","_indiana_external_in_%")
 
@@ -171,7 +184,7 @@ year_cross_fn <- function(annual_demographics, mean_list) {
       str_detect(County,"wisconsin") ~ "Wisconsin",
       T ~ "Other"
     ),
-          Region = case_when(
+          Region_cc = case_when(
             str_detect(County,"external_il") ~ "External IL",
             str_detect(County,"external_in") ~ "External IN",
             str_detect(County,"external_wi") ~ "External WI",
@@ -212,8 +225,9 @@ new_list_five_year$x2050 <- rbind(new_list$x2046, new_list$x2047, new_list$x2048
 
 combine_years <- function(df) {
   df <- df |>
-    group_by(age_group, sex, County, Region, State) |>
-    summarize(new_immigrants = sum(new_immigrants))
+    group_by(age_group, sex, County, Region_cc, State) |>
+    summarize(new_immigrants = sum(new_immigrants)) |>
+    clean_names()
 
   return(df)
 }
@@ -267,7 +281,7 @@ save(five_year_combined, file="Output/International_mig_proj.Rdata")
 
 
 #
-# |>
+#
 #   mutate(baseline_cmap = (as.numeric(baseline)*1000)*(mean_mig/100),
 #          low_cmap = (as.numeric(low)*1000)*(mean_mig/100),
 #          high_cmap = (as.numeric(high)*1000)*(mean_mig/100),
@@ -284,7 +298,7 @@ save(five_year_combined, file="Output/International_mig_proj.Rdata")
 
 
 #
-# |>
+#
 #   mutate(baseline_cmap = (as.numeric(baseline)*1000)*(mean_mig/100),
 #          low_cmap = (as.numeric(low)*1000)*(mean_mig/100),
 #          high_cmap = (as.numeric(high)*1000)*(mean_mig/100),

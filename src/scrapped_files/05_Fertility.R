@@ -6,7 +6,7 @@ library(readxl)
 library(janitor)
 
 load("Output/POP_PEP.Rdata") # POP
-load("Output/GQData2.Rdata") # GQ, GQ_Military, GQratios
+load("Output/GQData2_region.Rdata") # GQ, GQ_Military, GQratios
 
 CMAP_GEOIDS <- cmapgeo::county_fips_codes$cmap
 
@@ -251,7 +251,7 @@ asfr_projections_region <- census_national_asfr_join |>
 #Calculate ASFR midpoints
 asfr_proj_five_year <- asfr_projections_region %>%
   pivot_wider(names_from = "year", values_from="asfr_proj") %>%
-  mutate('asfr_2022.5'=rowMeans(across('2023':'2025')), #think about incorporating observed values here
+  mutate('asfr_2023.5'=rowMeans(across('2023':'2025')), #think about incorporating observed values here
          'asfr_2027.5'=rowMeans(across('2025':'2030')),
          'asfr_2032.5'=rowMeans(across('2030':'2035')),
          'asfr_2037.5'=rowMeans(across('2035':'2040')),
@@ -296,7 +296,16 @@ gender_ratios <- birth_gender_data_by_region |>
   mutate(gender_ratio = births_by_gender / total_births) %>%
   group_by(region_cc, sex) %>%
   summarize(average_gender_ratio = mean(gender_ratio)) %>%
-  pivot_wider(names_from = "sex", values_from = "average_gender_ratio")
+  pivot_wider(names_from = "sex", values_from = "average_gender_ratio") |>
+  clean_names() |>
+  left_join(tibble(county_name = str_c(names(cmapgeo::county_fips_codes$cmap), " County"),
+                   county_fips = cmapgeo::county_fips_codes$cmap), #need to translate county name to geoid
+            by = c("region_cc" = "county_name")) |>
+  mutate(region_cc = case_when(
+    is.na(county_fips) ~ region_cc,
+    T ~ county_fips
+  )) |>
+  select(!county_fips)
 
 
 #ab -- honetly have no idea what this is doing and I think its vestigal; going to comment

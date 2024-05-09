@@ -72,55 +72,24 @@ mort_data_with_1_4 <- mort_data %>%
                                 age == '1 to 4 years' ~ lag(population)*age_0_4_share,
                                 TRUE ~ population)) %>%
   select(!age_0_4_share) %>%
-  filter(age != '0 to 4 years')
+  filter(age != '0 to 4 years') |>
+  mutate(annual_survival_rate = 1 - (mortality/population),
+         period_surival_rate = case_when(
+           age == "0 to 1 years" ~ annual_survival_rate, #one year in period (0-1)
+           age == "1 to 4 years" ~ annual_survival_rate ^ 4, #four years in period
+           T ~ annual_survival_rate^5
+         ))
 
-# Life Tables Calculations ---------------------------------------------------------
+## AB Note -- previous versions of this code used life tables; after talking to Alexis I don't think this is
+## the way we want to go. The forecast book explains life tables on page 55, but the general idea is that
+## when we calculate things like life expectancy we can't just assume that everyone dies at the end of the period
+## and need ot account for the deoniminator shifting as people die
 
-#Life tables are a common means of constructing survival rates -- see forecast book p. 54
+## we aren't projecting life expectancy or measuring years lived or anything, so we dont need them
+## we are just interested in "how many people die between t0 and t1" and not interested in when they died
 
-#ab note 4/29/2024 -- dont think we actually need these but keeping in for now just in case
-
-LT <- tibble(age = unique(deaths$age)) %>%
-  mutate(x = as.numeric(str_split_fixed(age, " ", 2)[,1])) %>%
-  arrange(x) %>%
-  add_column(Ax = c(0.1,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5))
-
-#i think Ax is an assumption about when in the internal people will die;
-#we assume the average person that dies in the five year interval dies halfway through
-#but for babies, much more likely to die earlier in interval;
-#we expect more deaths right after birth than 9 months after birth
-
-
-#see page 54 of forecast book for variable definitions
-life_table <- mort_data_with_1_4 %>%
-  left_join(LT, by="age") %>%
-  select(region_cc, sex, age, mortality, population, x, Ax) %>%
-  arrange(region_cc, desc(sex), x) %>%
-  group_by(region_cc, sex) %>%
-  mutate(Mx = (mortality/as.numeric(population)), #Mortality rate (using mid-year population)
-    n = case_when(age == '0 to 1 years' ~ 1, # n -- number of years in interval
-                  age == '1 to 4 years' ~ 4,
-                  age == '85 years and over' ~ 2/Mx, #I have thought about this calc a lot and don't have a perfect
-                              #conceptual understanding of it; however the n value for 85+ isn't used in subsequent code
-                  TRUE ~ 5),
-    Qx = ifelse(age == '85 years and over', 1,  # 85+ should always be 1
-                (n*Mx/(1+n*(1-Ax)*Mx))), #proportion that will die during that age internal; formula to adjust for mid-year population denom
-    Px = (1-Qx), #probabilty of living through age period
-    Ix = head(accumulate(Px, `*`, .init=100000), -1), # 0-1 should always be 100000 -- number of people who reach age interval; 100000*p
-    Dx = (ifelse(age == '85 years and over', Ix, Ix -lead(Ix))), #number of people that will die during internal
-    Lx = (ifelse(age == '85 years and over', Ix/Mx, n*(lead(Ix)+(Ax*Dx)))), # of person years lived
-    temp = ifelse(age == '85 years and over', Lx, 0),
-    Tx = (ifelse(age == '85 years and Over', Lx, accumulate(Lx, `+`, .dir = "backward"))), #cumulative number of person years lived after internval
-    Ex = (Tx/Ix), #life expectancy, number of people over number of future person years
-    Sx = case_when(age == '0 to 1 years' ~ Lx/Ix,
-                   age == '1 to 4 years' ~ Lx/(lag(Lx)*4),
-                   age == '5 to 9 years' ~ Lx/(lag(Lx) + lag(Lx, n = 2)),
-                   age == '85 years and over' ~ Lx/(Lx +lag(Lx)),
-                   TRUE ~ Lx/lag(Lx)) #survival rate in life years
-  ) %>%
-  select(-temp) %>%
-  relocate(c(x, n, Ax), .before= mortality) %>%
-  ungroup()
+## the overall impact is that the survival rates are slightly lower as people no longer get credit for
+## surviing partway through the interval
 
 # Read in Census tables -----------------------------------------------------------
 
@@ -221,16 +190,24 @@ census_data_combined <- census_17_proc |>
 
 # Create final projections for each region  ------------------------------------
 
-mort_proj <- life_table %>%
-  select(region_cc, sex, age, Sx) %>%
+mort_proj <- mort_data_with_1_4 %>%
+  select(region_cc, sex, age, period_surival_rate) %>%
   left_join(census_data_combined, by= c("sex", "age")) %>%
-  mutate(across(c(5:11), .fns = ~.*Sx)) %>%
-  #select(-Sx)
-  rename("x2018" = Sx) #keep the calculated Sx
+  mutate(across(c(5:11), .fns = ~.*period_surival_rate)) %>%
+  rename("x2018" = period_surival_rate) #keep the calculated Sx
+
+mort_proj_midpoints <- mort_proj %>%
+  mutate('mort_2023.5'=rowMeans(across('x2020':'x2025')), #the Census data only includes 2023 on but is coded as x2020
+  'mort_2027.5'=rowMeans(across('x2025':'x2030')),
+  'mort_2032.5'=rowMeans(across('x2030':'x2035')),
+  'mort_2037.5'=rowMeans(across('x2035':'x2040')),
+  'mort_2042.5'=rowMeans(across('x2040':'x2045')),
+  'mort_2047.5'=rowMeans(across('x2045':'x2050'))) |>
+   select(c(1:3) | starts_with("mort_"))
 
 # Clean-up to values >= 1  ------------------------------------ This could use some adjustments to make it more dynamic
 
 # qc_over_1 <- Mort_Proj %>% filter_at(vars(4:11), any_vars(. >= 1))
 
-save(deaths, mort_proj, mort_pop, file="Output/Mort_Proj.Rdata")
+save(deaths, mort_proj_midpoints, mort_pop, file="Output/Mort_Proj.Rdata")
 

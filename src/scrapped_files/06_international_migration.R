@@ -188,7 +188,7 @@ year_cross_fn <- function(annual_demographics, mean_list) {
             str_detect(County,"external_il") ~ "External IL",
             str_detect(County,"external_in") ~ "External IN",
             str_detect(County,"external_wi") ~ "External WI",
-            str_detect(County,"cmap_region") ~ "CMAP Region",
+            str_detect(County,"17") ~ as.character(parse_number(County)),
             T ~ "Other"
           ),
           County = str_remove(County,str_c(ending_list, collapse = "|")),
@@ -206,17 +206,17 @@ new_list <- map2(international_mig_list, mean_migration_year, year_cross_fn)
 #can optimize
 new_list_five_year <- list()
 
-new_list_five_year$x2025 <- rbind(new_list$x2023, new_list$x2024, new_list$x2025)
+new_list_five_year$x2022 <- rbind(new_list$x2023, new_list$x2024)
 
-new_list_five_year$x2030 <- rbind(new_list$x2026, new_list$x2027, new_list$x2028, new_list$x2029, new_list$x2030)
+new_list_five_year$x2025 <- rbind(new_list$x2025, new_list$x2026, new_list$x2027, new_list$x2028, new_list$x2029)
 
-new_list_five_year$x2035 <- rbind(new_list$x2031, new_list$x2032, new_list$x2033, new_list$x2034, new_list$x2035)
+new_list_five_year$x2030 <- rbind(new_list$x2030, new_list$x2031, new_list$x2032, new_list$x2033, new_list$x2034)
 
-new_list_five_year$x2040 <- rbind(new_list$x2036, new_list$x2037, new_list$x2038, new_list$x2039, new_list$x2040)
+new_list_five_year$x2035 <- rbind(new_list$x2035, new_list$x2036, new_list$x2037, new_list$x2038, new_list$x2039)
 
-new_list_five_year$x2045 <- rbind(new_list$x2041, new_list$x2042, new_list$x2043, new_list$x2044, new_list$x2045)
+new_list_five_year$x2040 <- rbind(new_list$x2040, new_list$x2041, new_list$x2042, new_list$x2043, new_list$x2044)
 
-new_list_five_year$x2050 <- rbind(new_list$x2046, new_list$x2047, new_list$x2048, new_list$x2049, new_list$x2050)
+new_list_five_year$x2045 <- rbind(new_list$x2045, new_list$x2046, new_list$x2047, new_list$x2048, new_list$x2049)
 
 
 # new_list_five_year$x2025 <- new_list_five_year$x2025 |>
@@ -225,16 +225,16 @@ new_list_five_year$x2050 <- rbind(new_list$x2046, new_list$x2047, new_list$x2048
 
 combine_years <- function(df) {
   df <- df |>
-    group_by(age_group, sex, County, Region_cc, State) |>
+    group_by(age_group, sex, County, Region_cc) |>
     summarize(new_immigrants = sum(new_immigrants)) |>
     clean_names()
 
   return(df)
 }
 
-five_year_combined <- map(new_list_five_year, combine_years)
+intl_imm_project_five_year <- map(new_list_five_year, combine_years)
 
-save(five_year_combined, file="Output/International_mig_proj.Rdata")
+save(intl_imm_project_five_year, file="Output/International_mig_proj.Rdata")
 
 # scraps ------------------------------------------------------------------
 

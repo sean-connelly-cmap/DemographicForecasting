@@ -235,8 +235,7 @@ POP[["1995"]] <- read_excel("Input/Pop1995.xlsx") |>
                           region == "CMAP Region" ~ geoid,
                           T ~ region
                           )
-  ) |>
-  select(!region)
+  )
 
 
 POP[["2005"]] <- read_excel("Input/Pop2005.xlsx") |>
@@ -246,10 +245,18 @@ POP[["2005"]] <- read_excel("Input/Pop2005.xlsx") |>
                           region == "CMAP Region" ~ geoid,
                           T ~ region
                           )
-  ) |>
-  select(!region)
-
+  )
 # Finalize ------------------------------------
+
+##late addition -- add region column to make easier to work with later
+for(YEAR in names(POP)) {
+
+  POP[[as.character(YEAR)]] <- POP[[as.character(YEAR)]] %>%
+      mutate(region = case_when(
+        str_detect(region_cc, "17") ~ "CMAP Region",
+        T ~ region_cc
+      ))
+}
 
 # sort list elements by year
 POP <- POP[as.character(sort(as.numeric(names(POP))))]

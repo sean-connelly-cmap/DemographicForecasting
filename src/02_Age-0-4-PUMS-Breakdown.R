@@ -132,15 +132,29 @@ pums_21co <- bind_rows(pums_il, pums_in, pums_wi) %>%
   right_join(puma_region, by=c("puma" = "PUMACE10", "st" = "STATEFP10"))
 
 # Summarize PUMS by age and region
-age_0_4_freq <- pums_21co %>%
+age_0_4_freq_cc <- pums_21co %>%
   group_by(region_cc, sex, age_group) %>%
   summarize(population = sum(pwgtp)) %>%
   mutate(age_0_4_share = population / sum(population)) %>%
   ungroup() %>%
   filter(!is.na(sex))
 
+age_0_4_freq_region <- pums_21co %>%
+  mutate(region = case_when(
+    str_detect(region_cc, "External") ~ region_cc,
+    T ~ "CMAP Region"
+  )) |>
+  group_by(region, sex, age_group) %>%
+  summarize(population = sum(pwgtp)) %>%
+  mutate(age_0_4_share = population / sum(population)) %>%
+  ungroup() %>%
+  filter(!is.na(sex))
+
 # Save table to output folder
-save(age_0_4_freq, file="Output/Age_0_4_Freq.Rdata")
+save(age_0_4_freq_cc, file="Output/Age_0_4_Freq_cc.Rdata")
+
+save(age_0_4_freq_region, file="Output/Age_0_4_Freq_region.Rdata")
+
 
 #clean environment
 rm(list=setdiff(ls(), c("age_0_4_freq","POP", "COUNTIES", "CMAP_GEOIDS")))
